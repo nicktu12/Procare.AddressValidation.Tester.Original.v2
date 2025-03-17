@@ -16,6 +16,10 @@ internal sealed class AddressValidationService
 {
     internal const string HttpClientName = "AddressValidationHttpClient";
 
+    private const int MaxRetries = 3;
+
+    private const int TimeoutMilliseconds = 750;
+
     private readonly IHttpClientFactory httpClientFactory;
 
     public AddressValidationService(IHttpClientFactory httpClientFactory)
@@ -27,11 +31,37 @@ internal sealed class AddressValidationService
 
     public async Task<string> GetAddressesAsync(AddressValidationRequest request, CancellationToken token = default)
     {
-        using HttpClient httpClient = this.httpClientFactory.CreateClient(HttpClientName);
-        using HttpRequestMessage httpRequest = request.ToHttpRequest();
-        using HttpResponseMessage response = await httpClient.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
-        response.EnsureSuccessStatusCode();
+        int retryCount = 0;
+        while (true)
+        {
+            try
+            {
+                using var timeoutCts = new CancellationTokenSource(TimeoutMilliseconds);
+                using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(timeoutCts.Token, token);
+                using HttpClient httpClient = this.httpClientFactory.CreateClient(HttpClientName);
+                using HttpRequestMessage httpRequest = request.ToHttpRequest();
+                using HttpResponseMessage response = await httpClient.SendAsync(
+                    httpRequest,
+                    HttpCompletionOption.ResponseHeadersRead,
+                    linkedCts.Token).ConfigureAwait(false);
 
-        return await response.Content.ReadAsStringAsync(token).ConfigureAwait(false);
+                response.EnsureSuccessStatusCode();
+                return await response.Content.ReadAsStringAsync(token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (retryCount < MaxRetries)
+            {
+                retryCount++;
+                await Task.Delay(100 * (int)Math.Pow(2, retryCount - 1), token).ConfigureAwait(false);
+            }
+            catch (HttpRequestException) when (retryCount < MaxRetries)
+            {
+                retryCount++;
+                await Task.Delay(100 * (int)Math.Pow(2, retryCount - 1), token).ConfigureAwait(false);
+            }
+            catch
+            {
+                throw;
+            }
+        }
     }
 }
