@@ -18,7 +18,11 @@ internal sealed class AddressValidationService
 
     private const int MaxRetries = 3;
 
-    private const int TimeoutMilliseconds = 750;
+    private const int TimeoutMs = 750;
+
+    private const int BaseDelayMs = 100;
+
+    private readonly Random random = new Random();
 
     private readonly IHttpClientFactory httpClientFactory;
 
@@ -36,7 +40,7 @@ internal sealed class AddressValidationService
         {
             try
             {
-                using var timeoutCts = new CancellationTokenSource(TimeoutMilliseconds);
+                using var timeoutCts = new CancellationTokenSource(TimeoutMs);
                 using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(timeoutCts.Token, token);
                 using HttpClient httpClient = this.httpClientFactory.CreateClient(HttpClientName);
                 using HttpRequestMessage httpRequest = request.ToHttpRequest();
@@ -51,7 +55,7 @@ internal sealed class AddressValidationService
                     {
                         retryCount++;
                         Console.WriteLine($"Received HTTP {(int)response.StatusCode} error. Retry attempt {retryCount} of {MaxRetries}");
-                        await Task.Delay(100 * (int)Math.Pow(2, retryCount - 1), token).ConfigureAwait(false);
+                        await Task.Delay(this.GetDelayAndJitter(retryCount), token).ConfigureAwait(false);
                         continue;
                     }
                     else
@@ -72,7 +76,7 @@ internal sealed class AddressValidationService
             catch (OperationCanceledException) when (retryCount < MaxRetries)
             {
                 retryCount++;
-                await Task.Delay(100 * (int)Math.Pow(2, retryCount - 1), token).ConfigureAwait(false);
+                await Task.Delay(this.GetDelayAndJitter(retryCount), token).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -82,12 +86,24 @@ internal sealed class AddressValidationService
             catch (HttpRequestException) when (retryCount < MaxRetries)
             {
                 retryCount++;
-                await Task.Delay(100 * (int)Math.Pow(2, retryCount - 1), token).ConfigureAwait(false);
+                await Task.Delay(this.GetDelayAndJitter(retryCount), token).ConfigureAwait(false);
             }
             catch
             {
                 throw;
             }
         }
+    }
+
+    private int GetDelayAndJitter(int retryCount)
+    {
+        // Calculate base delay with exponential backoff
+        var baseDelay = BaseDelayMs * (int)Math.Pow(2, retryCount - 1);
+
+        // Add random jitter between 0% and 30% of the base delay
+        var jitter = this.random.Next(0, (int)(baseDelay * 0.3));
+
+        Console.WriteLine($"Backing off for {baseDelay + jitter}ms (base: {baseDelay}ms, jitter: {jitter}ms)");
+        return baseDelay + jitter;
     }
 }
