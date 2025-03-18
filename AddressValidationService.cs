@@ -97,10 +97,8 @@ internal sealed class AddressValidationService
 
     private int GetDelayAndJitter(int retryCount)
     {
-        // Calculate base delay with exponential backoff
         var baseDelay = BaseDelayMs * (int)Math.Pow(2, retryCount - 1);
 
-        // Add random jitter between 0% and 30% of the base delay
         var jitter = this.random.Next(0, (int)(baseDelay * 0.3));
 
         Console.WriteLine($"Backing off for {baseDelay + jitter}ms (base: {baseDelay}ms, jitter: {jitter}ms)");
