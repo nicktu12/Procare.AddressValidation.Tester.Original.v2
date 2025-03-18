@@ -45,13 +45,39 @@ internal sealed class AddressValidationService
                     HttpCompletionOption.ResponseHeadersRead,
                     linkedCts.Token).ConfigureAwait(false);
 
-                response.EnsureSuccessStatusCode();
+                if ((int)response.StatusCode >= 500 && (int)response.StatusCode < 600)
+                {
+                    if (retryCount < MaxRetries)
+                    {
+                        retryCount++;
+                        Console.WriteLine($"Received HTTP {(int)response.StatusCode} error. Retry attempt {retryCount} of {MaxRetries}");
+                        await Task.Delay(100 * (int)Math.Pow(2, retryCount - 1), token).ConfigureAwait(false);
+                        continue;
+                    }
+                    else
+                    {
+                        Console.WriteLine($"Max retries ({MaxRetries}) reached for HTTP {(int)response.StatusCode} error. Throwing exception.");
+                        response.EnsureSuccessStatusCode();
+                    }
+                }
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    Console.WriteLine($"Received non-5xx error ({(int)response.StatusCode}). Throwing immediately without retry.");
+                    response.EnsureSuccessStatusCode();
+                }
+
                 return await response.Content.ReadAsStringAsync(token).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (retryCount < MaxRetries)
             {
                 retryCount++;
                 await Task.Delay(100 * (int)Math.Pow(2, retryCount - 1), token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                Console.WriteLine($"Max retries ({MaxRetries}) reached for timeout. Throwing exception.");
+                throw;
             }
             catch (HttpRequestException) when (retryCount < MaxRetries)
             {
