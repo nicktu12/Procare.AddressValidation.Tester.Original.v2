@@ -36,7 +36,7 @@ internal sealed class AddressValidationService
     public async Task<string> GetAddressesAsync(AddressValidationRequest request, CancellationToken token = default)
     {
         int retryCount = 0;
-        while (true)
+        while (retryCount <= MaxRetries)
         {
             try
             {
@@ -58,11 +58,9 @@ internal sealed class AddressValidationService
                         await Task.Delay(this.GetDelayAndJitter(retryCount), token).ConfigureAwait(false);
                         continue;
                     }
-                    else
-                    {
-                        Console.WriteLine($"Max retries ({MaxRetries}) reached for HTTP {(int)response.StatusCode} error. Throwing exception.");
-                        response.EnsureSuccessStatusCode();
-                    }
+
+                    Console.WriteLine($"Max retries ({MaxRetries}) reached for HTTP {(int)response.StatusCode} error. Throwing exception.");
+                    response.EnsureSuccessStatusCode();
                 }
 
                 if (!response.IsSuccessStatusCode)
@@ -76,6 +74,13 @@ internal sealed class AddressValidationService
             catch (OperationCanceledException) when (retryCount < MaxRetries)
             {
                 retryCount++;
+                Console.WriteLine($"Request timed out. Retry attempt {retryCount} of {MaxRetries}");
+                await Task.Delay(this.GetDelayAndJitter(retryCount), token).ConfigureAwait(false);
+            }
+            catch (HttpRequestException) when (retryCount < MaxRetries)
+            {
+                retryCount++;
+                Console.WriteLine($"HTTP request failed. Retry attempt {retryCount} of {MaxRetries}");
                 await Task.Delay(this.GetDelayAndJitter(retryCount), token).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
@@ -83,16 +88,9 @@ internal sealed class AddressValidationService
                 Console.WriteLine($"Max retries ({MaxRetries}) reached for timeout. Throwing exception.");
                 throw;
             }
-            catch (HttpRequestException) when (retryCount < MaxRetries)
-            {
-                retryCount++;
-                await Task.Delay(this.GetDelayAndJitter(retryCount), token).ConfigureAwait(false);
-            }
-            catch
-            {
-                throw;
-            }
         }
+
+        throw new HttpRequestException($"Max retries ({MaxRetries}) reached without success.");
     }
 
     private int GetDelayAndJitter(int retryCount)
