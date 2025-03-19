@@ -97,7 +97,9 @@ internal sealed class AddressValidationService
     {
         var baseDelay = BaseDelayMs * (int)Math.Pow(2, retryCount - 1);
 
+        #pragma warning disable CA5394
         var jitter = this.random.Next(0, (int)(baseDelay * 0.3));
+        #pragma warning restore CA5394
 
         Console.WriteLine($"Backing off for {baseDelay + jitter}ms (base: {baseDelay}ms, jitter: {jitter}ms)");
         return baseDelay + jitter;
